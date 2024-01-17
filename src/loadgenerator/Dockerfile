@@ -1,35 +1,15 @@
-# Copyright 2020 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+FROM golang:1.18 as builder
+WORKDIR /app
 
-FROM python:3.11.6-slim@sha256:e932b9a0f25c306d542fc69133d24b872a6a264810e300b553e7ecd027599ca5 as base
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
 
-FROM base as builder
+RUN CGO_ENABLED=0 GOOS=linux go build -v -o loadgen cmd/loadgen/main.go
 
-COPY requirements.txt .
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/loadgen .
+ENTRYPOINT ["./loadgen", "-users=${USERS:-10}", "-url=http://${FRONTEND_ADDR}"]
 
-RUN pip install --prefix="/install" -r requirements.txt
-
-FROM base
-
-WORKDIR /loadgen
-
-COPY --from=builder /install /usr/local
-
-# Add application code.
-COPY locustfile.py .
-
-# enable gevent support in debugger
-ENV GEVENT_SUPPORT=True
-
-ENTRYPOINT locust --host="http://${FRONTEND_ADDR}" --headless -u "${USERS:-10}" 2>&1
